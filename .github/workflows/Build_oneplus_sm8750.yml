@@ -582,7 +582,9 @@ jobs:
         run: |
           cd kernel_workspace
           echo "正在配置SukiSU Ultra..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s main
+          # 使用 setup.sh 默认行为（检出 latest tag），当前 latest 是 v4.2.0（85eb4a95），
+          # 该 commit 与 cctv18/susfs4oki 的 10_enable_susfs_for_ksu.patch 完全兼容
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s
           # 提前克隆 susfs4oki，使后续 SUSFS 步骤可以重复使用
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ] && [ ! -d "susfs4ksu" ]; then
             git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
@@ -591,21 +593,20 @@ jobs:
           # 应用 susfs4oki 对 SukiSU-Ultra 源码树的集成补丁（10_enable_susfs_for_ksu.patch）
           # 该补丁会把 CONFIG_KSU_SUSFS 等选项注入 SukiSU-Ultra 的 Kconfig，
           # 并改写 core/init.c、feature/sucompat.c 等以对接 susfs。
+          # 注意：此 patch 与 SukiSU Ultra 最新 main 不兼容，必须使用 v4.2.0 tag。
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ]; then
             echo "正在为 SukiSU-Ultra 源码应用 susfs 集成补丁 10_enable_susfs_for_ksu.patch ..."
             cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
             patch -p1 -F 3 < 10_enable_susfs_for_ksu.patch || true
           fi
           # SukiSU Ultra 版本号公式：40000 + commits - 2815
-          # 优先从 GitHub API 获取精确 commit 数；fallback 走 git rev-list
-          GIT_COMMIT_COUNT=$(curl -sI "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/commits?sha=main&per_page=1" | grep -i 'link:' | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p')
-          if [ -z "$GIT_COMMIT_COUNT" ]; then
-            GIT_COMMIT_COUNT=$(git rev-list --count main 2>/dev/null || echo 3715)
-          fi
-          KSU_VERSION=$(expr ${GIT_COMMIT_COUNT} + 40000 - 2815 2>/dev/null || echo 40900)
+          # 这里用本地 checkout 的 commit count（精确）；fallback 用 40898（v4.2.0）
+          cd ..
+          GIT_COMMIT_COUNT=$(git -C ./KernelSU rev-list --count HEAD 2>/dev/null || echo 3713)
+          KSU_VERSION=$(expr ${GIT_COMMIT_COUNT} + 40000 - 2815 2>/dev/null || echo 40898)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-          echo "SukiSU Ultra 版本号：$KSU_VERSION"
+          echo "SukiSU Ultra 版本号：$KSU_VERSION (commit count: $GIT_COMMIT_COUNT)"
           
             
       - name: 🔧 Set up SUSFS (配置 SUSFS)
