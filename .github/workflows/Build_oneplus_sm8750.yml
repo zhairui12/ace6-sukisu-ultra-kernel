@@ -582,27 +582,54 @@ jobs:
         run: |
           cd kernel_workspace
           echo "正在配置SukiSU Ultra..."
-          # 使用 setup.sh 默认行为（检出 latest tag），当前 latest 是 v4.2.0（85eb4a95），
-          # 该 commit 与 cctv18/susfs4oki 的 10_enable_susfs_for_ksu.patch 完全兼容
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s
-          # 提前克隆 susfs4oki，使后续 SUSFS 步骤可以重复使用
+          # 先克隆 SukiSU-Ultra 仓库（指定深度 200 以包含 v4.2.0 tag），手动 checkout 到兼容 commit
+          # 该 commit（85eb4a95）与 cctv18/susfs4oki 的 10_enable_susfs_for_ksu.patch 干净兼容
+          git clone --depth=200 --no-single-branch https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU_temp 2>&1 | tail -5
+          cd KernelSU_temp
+          git checkout 85eb4a95b8a61d756ecf53b9c5785e48e1b15039 2>&1 | tail -3
+          echo "当前 SukiSU-Ultra HEAD: $(git log --oneline -1)"
+          # 用 setup.sh 把它接到 drivers/kernelsu，但 setup.sh 默认会 clone main，我们手工做完 setup.sh 的工作
+          cd ..
+          rm -rf KernelSU
+          mv KernelSU_temp KernelSU
+          cd KernelSU
+          # 手工执行 setup.sh 的核心操作：在 common 仓库的 drivers/ 下创建 symlink + 修改 Makefile/Kconfig
+          # 由于 setup.sh 需要 GKI_ROOT 指向 common，我们使用参数调用
+          cd ..
+          bash -c '
+            export GKI_ROOT="$(pwd)/common"
+            if [ ! -d "$GKI_ROOT" ]; then
+              echo "::error::common 目录不存在，无法完成 SukiSU Ultra 集成"
+              exit 1
+            fi
+            cd "$GKI_ROOT"
+            # 添加 drivers/Kconfig source 行
+            if ! grep -q "source \"drivers/kernelsu/Kconfig\"" drivers/Kconfig; then
+              echo "source \"drivers/kernelsu/Kconfig\"" >> drivers/Kconfig
+            fi
+            # 添加 drivers/Makefile obj 行
+            if ! grep -q "obj-\$(CONFIG_KSU) += kernelsu/" drivers/Makefile; then
+              echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
+            fi
+            # 创建 symlink
+            rm -rf drivers/kernelsu
+            ln -s ../../KernelSU/kernel drivers/kernelsu
+            echo "[OK] SukiSU-Ultra 已集成到 common 内核源码树"
+          '
+          # 提前克隆 susfs4oki
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ] && [ ! -d "susfs4ksu" ]; then
             git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
           fi
-          cd ./KernelSU
-          # 应用 susfs4oki 对 SukiSU-Ultra 源码树的集成补丁（10_enable_susfs_for_ksu.patch）
-          # 该补丁会把 CONFIG_KSU_SUSFS 等选项注入 SukiSU-Ultra 的 Kconfig，
-          # 并改写 core/init.c、feature/sucompat.c 等以对接 susfs。
-          # 注意：此 patch 与 SukiSU Ultra 最新 main 不兼容，必须使用 v4.2.0 tag。
+          cd KernelSU/kernel
+          # 应用 susfs4oki 集成补丁
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ]; then
             echo "正在为 SukiSU-Ultra 源码应用 susfs 集成补丁 10_enable_susfs_for_ksu.patch ..."
-            cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+            cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
             patch -p1 -F 3 < 10_enable_susfs_for_ksu.patch || true
           fi
           # SukiSU Ultra 版本号公式：40000 + commits - 2815
-          # 这里用本地 checkout 的 commit count（精确）；fallback 用 40898（v4.2.0）
-          cd ..
-          GIT_COMMIT_COUNT=$(git -C ./KernelSU rev-list --count HEAD 2>/dev/null || echo 3713)
+          cd ../..
+          GIT_COMMIT_COUNT=$(git -C ./KernelSU/kernel rev-list --count HEAD 2>/dev/null || echo 3713)
           KSU_VERSION=$(expr ${GIT_COMMIT_COUNT} + 40000 - 2815 2>/dev/null || echo 40898)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
