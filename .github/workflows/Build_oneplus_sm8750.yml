@@ -577,23 +577,45 @@ jobs:
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
 
           
-      - name: ⚙️ Set ReSukiSU (设置ReSukiSU)
+      - name: ⚙️ Set SukiSU Ultra (设置SukiSU Ultra)
         id: ksu_step
         run: |
           cd kernel_workspace
-          echo "正在配置ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
-          cd ./KernelSU 
-          KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
+          echo "正在配置SukiSU Ultra..."
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s main
+          # 提前克隆 susfs4oki，使后续 SUSFS 步骤可以重复使用
+          if [ "${{ env.ENABLE_SUSFS }}" == 'true' ] && [ ! -d "susfs4ksu" ]; then
+            git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
+          fi
+          cd ./KernelSU
+          # 应用 susfs4oki 对 SukiSU-Ultra 源码树的集成补丁（10_enable_susfs_for_ksu.patch）
+          # 该补丁会把 CONFIG_KSU_SUSFS 等选项注入 SukiSU-Ultra 的 Kconfig，
+          # 并改写 core/init.c、feature/sucompat.c 等以对接 susfs。
+          if [ "${{ env.ENABLE_SUSFS }}" == 'true' ]; then
+            echo "正在为 SukiSU-Ultra 源码应用 susfs 集成补丁 10_enable_susfs_for_ksu.patch ..."
+            cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+            patch -p1 -F 3 < 10_enable_susfs_for_ksu.patch || true
+          fi
+          # SukiSU Ultra 版本号公式：40000 + commits - 2815
+          # 优先从 GitHub API 获取精确 commit 数；fallback 走 git rev-list
+          GIT_COMMIT_COUNT=$(curl -sI "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/commits?sha=main&per_page=1" | grep -i 'link:' | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p')
+          if [ -z "$GIT_COMMIT_COUNT" ]; then
+            GIT_COMMIT_COUNT=$(git rev-list --count main 2>/dev/null || echo 3715)
+          fi
+          KSU_VERSION=$(expr ${GIT_COMMIT_COUNT} + 40000 - 2815 2>/dev/null || echo 40900)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
+          echo "SukiSU Ultra 版本号：$KSU_VERSION"
           
             
       - name: 🔧 Set up SUSFS (配置 SUSFS)
         if: ${{ env.ENABLE_SUSFS == 'true' }}
         run: |
           cd kernel_workspace
-          git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
+          # 若前一步未克隆（如未走 Set SukiSU Ultra 步骤），此处补克隆
+          if [ ! -d "susfs4ksu" ]; then
+            git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
+          fi
           wget https://raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8750/main/other_patch/69_hide_stuff.patch -O ./common/69_hide_stuff.patch
           cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
           cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
@@ -608,8 +630,8 @@ jobs:
           cd kernel_workspace
           echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-Re-TG@qdykernel"' >> ./common/arch/arm64/configs/gki_defconfig
-          
+          # SukiSU Ultra 使用 tracepoint hook，无需 tracepoint 之外的配置
+
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ];then
             echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -787,7 +809,7 @@ jobs:
       - name: 📤 Upload AnyKernel3 (上传 Anykernel3)
         uses: actions/upload-artifact@v6
         with:
-         name: AK3_${{ env.KSUVER }}_${{ env.DEVICES_NAME }}_ReSukiSU
+         name: AK3_${{ env.KSUVER }}_${{ env.DEVICES_NAME }}_SukiSU-Ultra
          path: ./AnyKernel3/*
 
   upload_rekernel:
@@ -960,7 +982,7 @@ jobs:
           if [ "${{ github.event.inputs.enable_droidspaces }}" = "true" ]; then
             FEATURES="${FEATURES}- ✅ Droidspaces 容器支持"$'\n'
           fi
-          FEATURES="${FEATURES}- ✅ ReSukiSU (KernelSU)"$'\n'
+          FEATURES="${FEATURES}- ✅ SukiSU Ultra (KernelSU)"$'\n'
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             FEATURES="${FEATURES}- ✅ SUSFS 挂载支持"$'\n'
           fi
@@ -982,7 +1004,7 @@ jobs:
           ### 📱 SM8750 欧加真通用内核 | 构建信息
 
           - **内核版本**: SM8750 (Android 15 / 6.6)
-          - **ReSukiSU 版本**: ${KSU_VER}
+          - **SukiSU Ultra 版本**: ${KSU_VER}
           - **编译时间**: ${TIME_FORM}
           - **编译机型**: ${DEVICE_NAME}
           - **内核后缀**: ${KERNEL_SUFFIX}
@@ -996,18 +1018,17 @@ jobs:
           ${FEATURES}
           ### ⏫️ 更新内容
 
-          - 更新 ReSukiSU 至最新版本 (${KSU_VER})
+          - 更新 SukiSU Ultra 至最新版本 (${KSU_VER})
           - 同步上游内核源码
 
           ### 📋 安装方法 | Installation Guide
 
-          1. 若你已刷入 ReSukiSU 内核，且 ReSukiSU 管理器已更新至最新版本，可在管理器中直接刷入 AnyKernel 刷机包并重启；
+          1. 若你已刷入 SukiSU Ultra 内核，且 SukiSU Ultra 管理器已更新至最新版本，可在管理器中直接刷入 AnyKernel 刷机包并重启；
           2. 由于 KernelSU 上游更新了元模块功能，最新版 KSU 管理器需要配合元模块 (metamodule) 才能正常挂载模块。目前的元模块包括 [meta overlayfs](https://github.com/KernelSU-Modules-Repo/meta-overlayfs), [mountify](https://github.com/backslashxx/mountify), [meta magicmount](https://github.com/7a72/meta-magic_mount/) 等。若你是第一次使用 KSU 或刚从旧版 KSU 管理器升级至新版，请先安装一个元模块；
           3. 若启用 Re-Kernel，需刷入配套Re-Kernel模块并配合 NoActive 软件使用，以提升后台冻结能力。
 
           #### 🔗 相关链接
 
-          - ReSukiSU 管理器: [ReSukiSU_CI](https://github.com/cctv18/ReSukiSU_CI/releases)
           - SukiSU Ultra 管理器: [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
           - KernelSU Next 管理器: [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next/releases)
           - KernelSU 原版管理器: [KernelSU](https://github.com/tiann/KernelSU/releases)

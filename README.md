@@ -1,4 +1,8 @@
-# OnePlus/Realme SM8750 内核构建项目
+# OnePlus/Realme SM8750 内核构建项目 (SukiSU Ultra 版 Fork)
+
+> **本仓库基于 [qdykernel/Build_Oneplus_Realme_Action](https://github.com/qdykernel/Build_Oneplus_Realme_Action) 修改，将默认的 ReSukiSU 替换为 [SukiSU Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)，并使用 SukiSU Ultra 的版本号公式（`40000 + commits - 2815`）。**
+>
+> 适用场景：希望使用官方 SukiSU Ultra 管理器（v4.1.x / v4.2.x），且要适配自己设备的内置 (built-in) SukiSU Ultra 内核。
 
 **`简体中文`** | [English](README-en.md)<br>
 
