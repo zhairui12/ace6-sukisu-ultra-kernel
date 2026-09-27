@@ -620,11 +620,12 @@ jobs:
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ] && [ ! -d "susfs4ksu" ]; then
             git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
           fi
-          cd KernelSU/kernel
           # 应用 susfs4oki 集成补丁
+          # patch 的路径前缀是 a/kernel/...，所以要在 KernelSU/ 目录下 patch
+          cd KernelSU
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ]; then
             echo "正在为 SukiSU-Ultra 源码应用 susfs 集成补丁 10_enable_susfs_for_ksu.patch ..."
-            cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+            cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
             patch -p1 -F 3 < 10_enable_susfs_for_ksu.patch || true
           fi
           # SukiSU Ultra 版本号公式：40000 + commits - 2815
